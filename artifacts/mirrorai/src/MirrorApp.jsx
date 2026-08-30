@@ -158,6 +158,39 @@ function makeWindows(messages, her, size = 40) {
   return output;
 }
 
+function mergeGroupWindows(windows, maxBatches = 8) {
+  if (windows.length <= maxBatches) return windows;
+  const batchCount = Math.min(maxBatches, windows.length);
+  return Array.from({ length: batchCount }, (_, index) => {
+    const start = Math.floor((index * windows.length) / batchCount);
+    const end = Math.floor(((index + 1) * windows.length) / batchCount);
+    return windows.slice(start, end).flat();
+  }).filter((batch) => batch.length > 0);
+}
+
+function sampleGroupWindows(windows, maxWindows = 120) {
+  if (windows.length <= maxWindows) return windows;
+  const indexes = new Set([0, windows.length - 1]);
+  for (let index = 0; index < maxWindows; index += 1) {
+    indexes.add(Math.round((index * (windows.length - 1)) / (maxWindows - 1)));
+  }
+  return [...indexes]
+    .sort((a, b) => a - b)
+    .map((index) => windows[index]);
+}
+
+function makeAnalysisCacheKey(messages, target) {
+  return JSON.stringify({
+    target,
+    messages: messages.map((message) => [
+      message.date || '',
+      message.time || '',
+      message.speaker || '',
+      message.text || '',
+    ]),
+  });
+}
+
 function memoryKey(memory) {
   return [memory.category, memory.title, memory.herMessage, memory.context].join('|').toLowerCase();
 }
@@ -194,6 +227,7 @@ function MirrorApp() {
   const [ready, setReady] = useState(false);
   const [search, setSearch] = useState('');
   const fileRef = useRef();
+  const analysisCache = useRef(new Map());
 
   useEffect(() => {
     (async () => {
@@ -292,6 +326,7 @@ function MirrorApp() {
     setBusy(true);
     setNotice('جاري قراءة ملفات واتساب…');
     try {
+      analysisCache.current.clear();
       const existing = new Set(
         messages.map((message) => `${message.date}|${message.time}|${message.speaker}|${message.text}`),
       );
@@ -331,8 +366,19 @@ function MirrorApp() {
     setBusy(true);
     setProgress(0);
     setParticipantAnalyses([]);
-      setNotice('جاري بناء تحليل مؤقت للجلسة…');
+    const cacheKey = makeAnalysisCacheKey(messages, her);
+    setNotice('جاري بناء تحليل مؤقت للجلسة…');
     try {
+      const cached = analysisCache.current.get(cacheKey);
+      if (cached) {
+        setProfile(cached.profile);
+        setMemories(cached.memories);
+        setParticipantAnalyses(cached.participantAnalyses || []);
+        setProgress(100);
+        setNotice('تمت إعادة استخدام تحليل الجلسة دون إرسال طلبات جديدة إلى Gemini.');
+        setTab('profile');
+        return;
+      }
       const profileResponse = await fetch('/api/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -343,23 +389,26 @@ function MirrorApp() {
       setProfile(profileData);
 
       const windows = makeWindows(messages, isGroupSelection ? GROUP_TARGET : her, 36);
-      const selected =
-        windows.length > 120
+      const selected = isGroupSelection
+        ? sampleGroupWindows(windows, 120)
+        : windows.length > 120
           ? windows.filter((_, index) => index % Math.ceil(windows.length / 120) === 0)
           : windows;
+      const memoryBatches = isGroupSelection ? mergeGroupWindows(selected, 8) : selected;
       const all = [];
-      for (let index = 0; index < selected.length; index += 1) {
+      for (let index = 0; index < memoryBatches.length; index += 1) {
         const response = await fetch('/api/memory-batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ herName: targetName, messages: selected[index] }),
+          body: JSON.stringify({ herName: targetName, messages: memoryBatches[index] }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'فشل الذاكرة');
         all.push(...(data.memories || []));
-        setProgress(Math.round(((index + 1) / selected.length) * 100));
+        setProgress(Math.round(((index + 1) / memoryBatches.length) * 100));
       }
       let participantNotice = '';
+      let nextParticipantAnalyses = [];
       if (isGroupSelection && names.length > 1) {
         try {
           const participantContext = [
@@ -382,12 +431,11 @@ function MirrorApp() {
               .filter((participant) => participant?.name)
               .map((participant) => [participant.name, participant]),
           );
-          setParticipantAnalyses(
-            names.map((name) => returnedParticipants.get(name) || {
+          nextParticipantAnalyses = names.map((name) => returnedParticipants.get(name) || {
               name,
               cautions: ['لم تُرجع نتيجة مستقلة لهذا الاسم. راجع السياق يدوياً قبل الاستنتاج.'],
-            }),
-          );
+            });
+          setParticipantAnalyses(nextParticipantAnalyses);
           participantNotice = ' وتم بناء تحليل مستقل للمشاركين.';
         } catch (error) {
           participantNotice = ` وتعذر تحليل المشاركين مستقلاً: ${error.message}`;
@@ -400,7 +448,18 @@ function MirrorApp() {
           deduped.set(key, memory);
         }
       });
-      setMemories([...deduped.values()].slice(0, 1200));
+      const nextMemories = [...deduped.values()].slice(0, 1200);
+      setMemories(nextMemories);
+      if (!isGroupSelection || nextParticipantAnalyses.length > 0) {
+        analysisCache.current.set(cacheKey, {
+          profile: profileData,
+          memories: nextMemories,
+          participantAnalyses: nextParticipantAnalyses,
+        });
+        while (analysisCache.current.size > 3) {
+          analysisCache.current.delete(analysisCache.current.keys().next().value);
+        }
+      }
       setNotice(`اكتمل التحليل المؤقت: ${deduped.size.toLocaleString('ar')} قرينة.${participantNotice} لم تُحفظ بالذاكرة الدائمة.`);
       setTab('profile');
     } catch (error) {
@@ -523,6 +582,7 @@ function MirrorApp() {
     setChat([]);
     setQuestion('');
     setAnalysis(null);
+    analysisCache.current.clear();
     setNotice('تم مسح بيانات الجلسة والذاكرة الدائمة.');
   }
 
@@ -544,6 +604,7 @@ function MirrorApp() {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.messages)) throw new Error('ملف النسخة الاحتياطية غير صالح');
       await dbClear();
+      analysisCache.current.clear();
       setMessages(data.messages);
       setFiles(data.files || []);
       setHer(data.her || '');
