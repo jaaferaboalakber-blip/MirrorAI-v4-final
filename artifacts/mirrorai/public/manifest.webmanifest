@@ -1,0 +1,19 @@
+{
+  "name": "مرآة الأسلوب",
+  "short_name": "مرآة الأسلوب",
+  "description": "تحليل أسلوب المحادثات وبناء ذاكرة سياقية محلية",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111214",
+  "theme_color": "#111214",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

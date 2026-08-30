@@ -1,0 +1,1 @@
+- [Gemini model availability](gemini-model-availability.md) — provider credentials may reject older text models; verify the currently enabled model with a small request.
