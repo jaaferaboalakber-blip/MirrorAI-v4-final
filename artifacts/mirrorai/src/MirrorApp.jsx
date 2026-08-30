@@ -149,6 +149,74 @@ function sampleForProfile(messages, max = 18000) {
   return [...head, ...middle, ...tail].slice(0, max);
 }
 
+function samplePersonaMessages(messages, her, max = 240) {
+  const targetIndexes = messages
+    .map((message, index) => (message.speaker === her ? index : -1))
+    .filter((index) => index >= 0);
+  if (!targetIndexes.length) return [];
+
+  const selected = new Set();
+  const addWithContext = (targetPosition) => {
+    const messageIndex = targetIndexes[Math.max(0, Math.min(targetPosition, targetIndexes.length - 1))];
+    selected.add(messageIndex);
+    if (messageIndex > 0) selected.add(messageIndex - 1);
+    if (messageIndex < messages.length - 1) selected.add(messageIndex + 1);
+  };
+
+  addWithContext(0);
+  addWithContext(targetIndexes.length - 1);
+  for (let index = 0; index < 12; index += 1) {
+    addWithContext(Math.round((index * (targetIndexes.length - 1)) / 11));
+  }
+
+  const expressive = targetIndexes
+    .map((index) => {
+      const text = String(messages[index].text || '');
+      return {
+        index,
+        score:
+          (text.length <= 55 ? 2 : 0) +
+          (text.length >= 180 ? 2 : 0) +
+          (/[؟?]/.test(text) ? 2 : 0) +
+          (/[!！…]/.test(text) ? 1 : 0) +
+          (/[\p{Extended_Pictographic}]/u.test(text) ? 2 : 0),
+      };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  expressive.slice(0, Math.max(12, Math.floor(max / 3))).forEach(({ index }) => {
+    const targetPosition = targetIndexes.indexOf(index);
+    addWithContext(targetPosition);
+  });
+
+  for (let index = 0; selected.size < max && index < targetIndexes.length; index += 1) {
+    addWithContext(Math.round((index * (targetIndexes.length - 1)) / Math.max(1, targetIndexes.length - 1)));
+  }
+
+  const ordered = [...selected].sort((a, b) => a - b);
+  if (ordered.length <= max) return ordered.map((index) => messages[index]);
+
+  const anchors = new Set();
+  [targetIndexes[0], targetIndexes[targetIndexes.length - 1]].forEach((messageIndex) => {
+    anchors.add(messageIndex);
+    if (messageIndex > 0) anchors.add(messageIndex - 1);
+    if (messageIndex < messages.length - 1) anchors.add(messageIndex + 1);
+  });
+  const remaining = ordered.filter((index) => !anchors.has(index));
+  const slots = Math.max(0, max - anchors.size);
+  for (let index = 0; index < slots && remaining.length; index += 1) {
+    anchors.add(remaining[Math.round((index * (remaining.length - 1)) / Math.max(1, slots - 1))]);
+  }
+  return [...anchors]
+    .sort((a, b) => a - b)
+    .slice(0, max)
+    .map((index) => messages[index]);
+}
+
+function listValues(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return value ? [String(value)] : [];
+}
+
 function makeWindows(messages, her, size = 40) {
   const output = [];
   for (let i = 0; i < messages.length; i += size) {
@@ -223,11 +291,21 @@ function MirrorApp() {
   const [notice, setNotice] = useState('');
   const [chat, setChat] = useState([]);
   const [chatInput, setChatInput] = useState('');
+  const [persona, setPersona] = useState(null);
+  const [personaChat, setPersonaChat] = useState([]);
+  const [personaInput, setPersonaInput] = useState('');
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [search, setSearch] = useState('');
   const fileRef = useRef();
   const analysisCache = useRef(new Map());
+  const personaCache = useRef(new Map());
+
+  useEffect(() => {
+    setPersona(null);
+    setPersonaChat([]);
+    setPersonaInput('');
+  }, [her]);
 
   useEffect(() => {
     (async () => {
@@ -327,6 +405,10 @@ function MirrorApp() {
     setNotice('جاري قراءة ملفات واتساب…');
     try {
       analysisCache.current.clear();
+      personaCache.current.clear();
+      setPersona(null);
+      setPersonaChat([]);
+      setPersonaInput('');
       const existing = new Set(
         messages.map((message) => `${message.date}|${message.time}|${message.speaker}|${message.text}`),
       );
@@ -469,6 +551,66 @@ function MirrorApp() {
     }
   }
 
+  async function buildPersona() {
+    if (isGroupSelection || !her || !herMessages.length) {
+      setNotice('اختر شخصاً محدداً من المحادثة قبل إنشاء نسخة AI.');
+      setTab('data');
+      return;
+    }
+    if (!profile.summary) {
+      setNotice('حلّل الشخص أولاً حتى تُبنى Persona من البصمة والقرائن الحالية.');
+      setTab('data');
+      return;
+    }
+
+    const cacheKey = makeAnalysisCacheKey(messages, her);
+    setBusy(true);
+    setNotice('جاري إنشاء نسخة AI من أسلوب الكلام…');
+    try {
+      const cachedPersona = personaCache.current.get(cacheKey);
+      if (cachedPersona) {
+        setPersona(cachedPersona);
+        setPersonaChat([]);
+        setPersonaInput('');
+        setNotice('تمت إعادة استخدام نسخة AI الموجودة في هذه الجلسة دون طلب جديد.');
+        setTab('persona');
+        return;
+      }
+
+      const response = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'persona-build',
+          herName: her,
+          profile,
+          memories: memories.slice(0, 100),
+          messages: samplePersonaMessages(messages, her, 240),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'فشل إنشاء نسخة AI.');
+      const nextPersona = {
+        ...data,
+        name: data.name || her,
+        sourceTarget: her,
+      };
+      personaCache.current.set(cacheKey, nextPersona);
+      while (personaCache.current.size > 3) {
+        personaCache.current.delete(personaCache.current.keys().next().value);
+      }
+      setPersona(nextPersona);
+      setPersonaChat([]);
+      setPersonaInput('');
+      setNotice('تم إنشاء نسخة AI مؤقتة مبنية على أسلوب الكلام الفعلي.');
+      setTab('persona');
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function saveMemory(memory) {
     setSavedMemories((current) => {
       const key = memoryKey(memory);
@@ -565,6 +707,52 @@ function MirrorApp() {
     }
   }
 
+  async function sendPersonaChat() {
+    if (!personaInput.trim() || busy || !persona) return;
+    const message = personaInput.trim();
+    setPersonaInput('');
+    const next = [...personaChat, { role: 'user', content: message }];
+    setPersonaChat(next);
+    setBusy(true);
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'persona',
+          herName: persona.sourceTarget || her,
+          persona,
+          memory: retrieve(message, allMemories, messages, her, 18),
+          chat: next,
+          message,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'فشل رد نسخة AI.');
+      setPersonaChat((current) => [...current, { role: 'assistant', content: data.answer }]);
+    } catch (error) {
+      setPersonaChat((current) => [
+        ...current,
+        { role: 'assistant', content: `تعذر تنفيذ الطلب: ${error.message}` },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startPersonaChat() {
+    if (!persona) return;
+    setPersonaChat([]);
+    setPersonaInput('');
+    setTab('persona');
+  }
+
+  function clearPersonaChat() {
+    setPersonaChat([]);
+    setPersonaInput('');
+    setNotice('تم بدء محادثة جديدة مع نسخة AI.');
+  }
+
   async function clearAll() {
     if (!window.confirm('سيتم حذف بيانات الجلسة والذاكرة الدائمة من هذا الجهاز. هل أنت متأكد؟')) {
       return;
@@ -583,6 +771,10 @@ function MirrorApp() {
     setQuestion('');
     setAnalysis(null);
     analysisCache.current.clear();
+    personaCache.current.clear();
+    setPersona(null);
+    setPersonaChat([]);
+    setPersonaInput('');
     setNotice('تم مسح بيانات الجلسة والذاكرة الدائمة.');
   }
 
@@ -605,6 +797,10 @@ function MirrorApp() {
       if (!Array.isArray(data.messages)) throw new Error('ملف النسخة الاحتياطية غير صالح');
       await dbClear();
       analysisCache.current.clear();
+      personaCache.current.clear();
+      setPersona(null);
+      setPersonaChat([]);
+      setPersonaInput('');
       setMessages(data.messages);
       setFiles(data.files || []);
       setHer(data.her || '');
@@ -657,6 +853,7 @@ function MirrorApp() {
         <nav aria-label="أقسام مرآة الأسلوب">
           {[
             ['chat', 'المحادثة'],
+            ['persona', 'نسخة AI'],
             ['analyze', 'تحليل موقف'],
             ['profile', 'البصمة'],
             ['memory', <>الذاكرة <i>{savedMemories.length}</i></>],
@@ -708,6 +905,92 @@ function MirrorApp() {
                 <button onClick={sendChat} disabled={busy} aria-label="إرسال">➤</button>
               </div>
             </div>
+          </div>
+        )}
+
+        {tab === 'persona' && (
+          <div className="persona-page">
+            {!persona ? (
+              <Card title="إنشاء نسخة AI" icon="♙" wide>
+                <p className="summary">اختر شخصاً محدداً، ابنِ بصمته أولاً، ثم أنشئ محادثة جديدة تحاكي طريقة كلامه الفعلية.</p>
+                <p className="muted">تحتاج هذه الخطوة إلى طلب Gemini واحد. لا تُرسل محادثة WhatsApp كاملة؛ تُرسل عينة موزعة مع profile والقرائن الحالية.</p>
+                <button className="primary persona-action" onClick={buildPersona} disabled={busy || isGroupSelection || !herMessages.length || !profile.summary}>
+                  إنشاء نسخة AI
+                </button>
+                {(!her || isGroupSelection || !profile.summary) && <p className="privacy">اختر شخصاً وليس المجموعة، ثم اضغط «حلّل مؤقتاً للجلسة» من تبويب البيانات أولاً.</p>}
+              </Card>
+            ) : (
+              <>
+                <Card title={`نسخة AI: ${persona.name || her}`} icon="♙" wide>
+                  <p className="summary">{persona.styleSummary || 'محاكاة مبنية على أمثلة الكلام والقرائن المتاحة.'}</p>
+                  <div className="chips">
+                    {listValues(persona.dialectAndVocabulary).slice(0, 8).map((item, index) => <span key={index}>{item}</span>)}
+                    {listValues(persona.responseLength).slice(0, 1).map((item, index) => <span key={`length-${index}`}>{item}</span>)}
+                  </div>
+                  <p className="persona-disclaimer">هذه محاكاة AI مبنية على المحادثة المتاحة، وليست الشخص الحقيقي ولا تعرف مشاعره أو نواياه الداخلية.</p>
+                  <div className="persona-actions">
+                    <button className="primary compact" onClick={startPersonaChat}>بدء محادثة جديدة</button>
+                    <button className="save-memory compact" onClick={clearPersonaChat}>مسح محادثة Persona</button>
+                  </div>
+                </Card>
+                <div className="two persona-details">
+                  <Card title="كيف تتكلم؟" icon="⌁">
+                    <ul>
+                      {[
+                        ...listValues(persona.sentenceStyle),
+                        ...listValues(persona.emojiStyle),
+                        ...listValues(persona.commonPhrases),
+                        ...listValues(persona.openings),
+                        ...listValues(persona.closings),
+                      ].slice(0, 18).map((item, index) => <li key={index}>{item}</li>)}
+                    </ul>
+                  </Card>
+                  <Card title="حسب الموقف والعلاقة" icon="◎">
+                    <ul>
+                      {[
+                        ...listValues(persona.humorStyle),
+                        ...listValues(persona.emotionalExpression),
+                        ...listValues(persona.interactionStyle),
+                        ...listValues(persona.situationPatterns),
+                      ].slice(0, 18).map((item, index) => <li key={index}>{item}</li>)}
+                    </ul>
+                  </Card>
+                </div>
+                <div className="chat-wrap">
+                  <div className="chatbox">
+                    <div className="chat-head">
+                      <div><b>محادثة مع {persona.name || her}</b><small>محاكاة AI مبنية على أسلوب الكلام</small></div>
+                      <span>●</span>
+                    </div>
+                    <div className="messages">
+                      {personaChat.length === 0 ? (
+                        <div className="welcome">
+                          <div className="welcome-icon" aria-hidden="true">✦</div>
+                          <h2>شنو تحب تحچي؟</h2>
+                          <p>ابدأ محادثة جديدة. الرد يعتمد على Persona والقرائن المرتبطة بسؤالك.</p>
+                        </div>
+                      ) : personaChat.map((item, index) => <div key={index} className={`bubble ${item.role}`}>{item.content}</div>)}
+                      {busy && <div className="bubble assistant typing">جاري التفكير…</div>}
+                    </div>
+                    <div className="composer">
+                      <textarea
+                        value={personaInput}
+                        onChange={(event) => setPersonaInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            sendPersonaChat();
+                          }
+                        }}
+                        placeholder="اكتب رسالة إلى نسخة AI…"
+                        aria-label="رسالة إلى نسخة AI"
+                      />
+                      <button onClick={sendPersonaChat} disabled={busy || !personaInput.trim()} aria-label="إرسال إلى نسخة AI">➤</button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -801,6 +1084,7 @@ function MirrorApp() {
               <label>{isGroupSelection ? 'المحادثة المراد تحليلها' : 'الشخص المراد تحليله'}<select value={her} onChange={(event) => setHer(event.target.value)}><option value="">اختر الاسم</option>{names.length > 1 && <option value={GROUP_TARGET}>كل المشاركين (المجموعة)</option>}{names.map((name) => <option key={name}>{name}</option>)}</select></label>
               <label>اسمك<input value={me} onChange={(event) => setMe(event.target.value)} placeholder="اختياري" /></label>
               <button className="primary" onClick={build} disabled={busy || !selectedMessages.length}>حلّل مؤقتاً للجلسة</button>
+               {!isGroupSelection && profile.summary && <button className="primary persona-action" onClick={buildPersona} disabled={busy}>إنشاء نسخة AI</button>}
               <div className="privacy">المحادثات والبصمة والقرائن المستخرجة تبقى مؤقتة داخل هذه الجلسة ولا تُحفظ تلقائياً. اختر «حفظ بالذاكرة» فقط للمواقف التي تريد الاحتفاظ بها دائماً.</div>
               {memories.length > 0 && <button className="save-memory save-all" onClick={saveAllMemories}>حفظ نتائج الجلسة بالذاكرة</button>}
               <button className="danger" onClick={clearPermanentMemory} disabled={!savedMemories.length}>مسح الذاكرة الدائمة</button>

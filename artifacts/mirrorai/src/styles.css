@@ -67,6 +67,11 @@ nav i { font-style: normal; font-size: 11px; background: #2d2735; padding: 2px 6
 }
 .composer textarea { min-height: 48px; max-height: 130px; flex: 1; }
 .composer button { width: 50px; border-radius: 13px; background: #b28cd5; color: #1a1420; font-size: 20px; }
+.persona-page { display: grid; gap: 16px; padding-top: 20px; }
+.two.persona-details { padding-top: 0; }
+.persona-action { margin-top: 12px; }
+.persona-disclaimer { margin: 18px 0 0; padding: 11px 13px; border: 1px solid #4b3d55; border-radius: 11px; color: #d4c3df; line-height: 1.7; background: #211c27; }
+.persona-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
 .two { display: grid; grid-template-columns: 1fr 1.15fr; gap: 16px; padding-top: 20px; }
 .profile, .memory-page { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 20px; }
 .participant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

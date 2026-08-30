@@ -77,11 +77,13 @@ function logError(req: Request, error: unknown) {
 router.post("/profile", async (req, res) => {
   if (aiUnavailable(res)) return;
   try {
-    const { herName, messages = [], mode, participants = [] } = req.body as {
+    const { herName, messages = [], mode, participants = [], profile = {}, memories = [] } = req.body as {
       herName?: string;
       messages?: Message[];
       mode?: string;
       participants?: string[];
+      profile?: Record<string, unknown>;
+      memories?: Memory[];
     };
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "لا توجد رسائل كافية لبناء البصمة." });
@@ -90,6 +92,28 @@ router.post("/profile", async (req, res) => {
       .map((message, index) => `${index}|${safe(message.date, 40)} ${safe(message.time, 40)}|${safe(message.speaker, 120)}|${safe(message.text, 1000)}`)
       .join("\n")
       .slice(0, MAX_INPUT);
+    if (mode === "persona-build") {
+      const memoryText = memories
+        .map((item, index) => `#${index + 1} [${safe(item.category, 80)}] ${safe(item.title, 200)}\nالسياق: ${safe(item.context, 900)}\nرسالة الشخص: ${safe(item.herMessage, 500)}\nالنمط: ${safe(item.responsePattern, 500)}\nالدليل: ${safe(item.evidence, 500)}`)
+        .join("\n\n")
+        .slice(0, 70_000);
+      const personaPrompt = `${BASE_INSTRUCTIONS}
+
+ابنِ Persona محاكاة أسلوبية للشخص «${safe(herName, 200)}» اعتماداً على ملف الأسلوب والقرائن وعينة الرسائل. هذه Persona ليست الشخص الحقيقي ولا تعرف مشاعره أو نواياه الداخلية. أعد JSON فقط بهذا الشكل:
+{"name":"اسم الشخص كما هو","styleSummary":"خلاصة عملية لكيفية كلامه","dialectAndVocabulary":["اللهجة والمفردات الفعلية"],"sentenceStyle":["تركيب الجمل وطريقة الصياغة"],"responseLength":"طول الردود واختصارها حسب السياق","emojiStyle":["الإيموجي واستخدامها"],"commonPhrases":["عبارات مميزة ومتكررة"],"openings":["طرق بدء الكلام"],"closings":["طرق إنهاء الكلام"],"humorStyle":"طريقة المزاح أو السخرية إن وجدت","emotionalExpression":["كيف يظهر الاهتمام أو الزعل أو الاعتذار في اللغة فقط"],"interactionStyle":["طريقة مخاطبة الطرف الآخر والرد عليه والأسماء أو الألقاب إن ظهرت"],"situationPatterns":["كيف يختلف الأسلوب حسب الموقف"],"exampleMessages":[{"situation":"السياق","message":"مثال فعلي أو مقتطف قصير","stylePoint":"ما الذي يوضحه المثال"}],"boundaries":["حدود ما لا يمكن استنتاجه"],"evidence":["أدلة مختصرة من الرسائل أو القرائن"]}
+
+ركز على «كيف يتكلم الشخص» وليس وصفاً عاماً لشخصيته. استخرج اللهجة والمفردات وتركيب الجمل وطول الردود والإيموجي والمزاح والتعبير اللغوي عن الاهتمام أو الزعل أو الاعتذار وطرق السؤال والبداية والنهاية. استفد من طريقة مخاطبته للمستخدم، الأسماء أو الألقاب، المزاح المتبادل، وطريقة الرد. لا تخترع عبارات أو ذكريات. إذا لم يظهر نمط بوضوح، اذكر أنه غير كافٍ بدلاً من التخمين. اجعل كل استنتاج قابلاً للملاحظة واحتمالياً.
+
+ملف الأسلوب:
+${JSON.stringify(profile).slice(0, 35_000)}
+
+القرائن:
+${memoryText}
+
+عينة الرسائل المرتبة زمنياً:
+${sample.slice(0, 140_000)}`;
+      return res.json(parseJson(await generate(personaPrompt, true)));
+    }
     if (mode === "participant-batch" && Array.isArray(participants) && participants.length > 0) {
       const participantList = participants
         .map((participant, index) => `${index + 1}. ${safe(participant, 200)}`)
@@ -185,12 +209,14 @@ ${safe(question, 70_000)}`;
 router.post("/chat", async (req, res) => {
   if (aiUnavailable(res)) return;
   try {
-    const { herName, profile = {}, memory = [], chat = [], message } = req.body as {
+    const { herName, profile = {}, memory = [], chat = [], message, mode, persona = {} } = req.body as {
       herName?: string;
       profile?: Record<string, unknown>;
       memory?: Memory[];
       chat?: { role?: string; content?: string }[];
       message?: string;
+      mode?: string;
+      persona?: Record<string, unknown>;
     };
     if (!message?.trim()) return res.status(400).json({ error: "اكتب سؤالك." });
     const memoryText = memory
@@ -201,6 +227,24 @@ router.post("/chat", async (req, res) => {
       .map((item) => `${item.role === "user" ? "المستخدم" : "المساعد"}: ${safe(item.content, 3000)}`)
       .join("\n")
       .slice(-30_000);
+    if (mode === "persona") {
+      const personaPrompt = `${BASE_INSTRUCTIONS}
+
+أنت الآن محادثة Persona محاكاة لأسلوب «${safe(herName, 200)}». تحدث بأسلوبه القابل للملاحظة كما تصفه Persona والأمثلة والقرائن، مع الحفاظ على طبيعية الحوار. لا تقل إنك الشخص الحقيقي، ولا تدّع معرفة مشاعره أو نواياه أو ذكرياته خارج البيانات. لا تخترع حدثاً أو ذكرى غير موجودة. إذا لم تقدم البيانات دليلاً كافياً على تفصيل ما، أجب بشكل طبيعي ومحايد ولا تقدمه كحقيقة. استخدم اللهجة والمفردات وطول الردود والإيموجي وطريقة المزاح والتعبير الظاهرة في Persona، ولا تكرر وصف Persona للمستخدم داخل كل رد.
+
+Persona:
+${JSON.stringify(persona).slice(0, 45_000)}
+
+قرائن مرتبطة بالرسالة:
+${memoryText}
+
+سياق محادثة Persona الجديدة:
+${conversation}
+
+رسالة المستخدم:
+${safe(message, 30_000)}`;
+      return res.json({ answer: await generate(personaPrompt) });
+    }
     const prompt = `${BASE_INSTRUCTIONS}
 
 أنت المساعد داخل «مرآة الأسلوب». أجب بالعربية العراقية الطبيعية عندما تناسب. اعتمد على ملف الأسلوب والذكريات المسترجعة وسياق الدردشة. إذا سأل المستخدم «شنو تقصد؟» أعطه القراءة الأقرب ثم الدليل والبدائل. إذا سأل «شنو أرد؟» اقترح ردوداً طبيعية ومحترمة وغير متلاعبة. لا تقل إنك تعرف ما في داخلها. لا تحوّل الذاكرة إلى تشخيص أو حكم.
