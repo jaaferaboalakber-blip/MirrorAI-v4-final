@@ -69,6 +69,11 @@ nav i { font-style: normal; font-size: 11px; background: #2d2735; padding: 2px 6
 .composer button { width: 50px; border-radius: 13px; background: #b28cd5; color: #1a1420; font-size: 20px; }
 .two { display: grid; grid-template-columns: 1fr 1.15fr; gap: 16px; padding-top: 20px; }
 .profile, .memory-page { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 20px; }
+.participant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.participant-card { background: #222328; border: 1px solid #34353c; border-radius: 14px; padding: 15px; }
+.participant-card h3 { margin: 0 0 12px; color: #e7d8f2; }
+.participant-card b { color: #c8abd9; }
+.participant-card p { line-height: 1.7; color: #c8c9ce; }
 .card { background: #18191d; border: 1px solid #2d2e34; border-radius: 18px; padding: 18px; min-width: 0; }
 .card.wide { grid-column: 1 / -1; }
 .ct { display: flex; gap: 9px; align-items: center; margin-bottom: 12px; }
@@ -130,7 +135,7 @@ footer { text-align: center; color: #72747c; font-size: 12px; padding: 30px 10px
   .app { padding: 10px 12px 30px; }
   .hero { padding: 42px 4px 25px; }
   .orb { display: none; }
-  .two, .profile { grid-template-columns: 1fr; }
+   .two, .profile, .participant-grid { grid-template-columns: 1fr; }
   .card.wide { grid-column: auto; }
   .memory-grid { grid-template-columns: 1fr; grid-column: auto; }
   .bubble { max-width: 90%; }

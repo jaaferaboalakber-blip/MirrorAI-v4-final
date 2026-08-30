@@ -180,6 +180,7 @@ function MirrorApp() {
   const [her, setHer] = useState('');
   const [me, setMe] = useState('');
   const [profile, setProfile] = useState(emptyProfile);
+  const [participantAnalyses, setParticipantAnalyses] = useState([]);
   const [memories, setMemories] = useState([]);
   const [savedMemories, setSavedMemories] = useState([]);
   const [tab, setTab] = useState('chat');
@@ -329,6 +330,7 @@ function MirrorApp() {
     }
     setBusy(true);
     setProgress(0);
+    setParticipantAnalyses([]);
       setNotice('جاري بناء تحليل مؤقت للجلسة…');
     try {
       const profileResponse = await fetch('/api/profile', {
@@ -357,6 +359,40 @@ function MirrorApp() {
         all.push(...(data.memories || []));
         setProgress(Math.round(((index + 1) / selected.length) * 100));
       }
+      let participantNotice = '';
+      if (isGroupSelection && names.length > 1) {
+        try {
+          const participantContext = [
+            ...new Map(selected.flat().map((message) => [message.id, message])).values(),
+          ];
+          const participantResponse = await fetch('/api/profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              mode: 'participant-batch',
+              herName: targetName,
+              participants: names,
+              messages: sampleForProfile(participantContext),
+            }),
+          });
+          const participantData = await participantResponse.json();
+          if (!participantResponse.ok) throw new Error(participantData.error || 'فشل تحليل المشاركين');
+          const returnedParticipants = new Map(
+            (Array.isArray(participantData.participants) ? participantData.participants : [])
+              .filter((participant) => participant?.name)
+              .map((participant) => [participant.name, participant]),
+          );
+          setParticipantAnalyses(
+            names.map((name) => returnedParticipants.get(name) || {
+              name,
+              cautions: ['لم تُرجع نتيجة مستقلة لهذا الاسم. راجع السياق يدوياً قبل الاستنتاج.'],
+            }),
+          );
+          participantNotice = ' وتم بناء تحليل مستقل للمشاركين.';
+        } catch (error) {
+          participantNotice = ` وتعذر تحليل المشاركين مستقلاً: ${error.message}`;
+        }
+      }
       const deduped = new Map();
       all.forEach((memory) => {
         const key = [memory.category, memory.title, memory.herMessage].join('|').toLowerCase();
@@ -365,7 +401,7 @@ function MirrorApp() {
         }
       });
       setMemories([...deduped.values()].slice(0, 1200));
-      setNotice(`اكتمل التحليل المؤقت: ${deduped.size.toLocaleString('ar')} قرينة. لم تُحفظ بالذاكرة الدائمة.`);
+      setNotice(`اكتمل التحليل المؤقت: ${deduped.size.toLocaleString('ar')} قرينة.${participantNotice} لم تُحفظ بالذاكرة الدائمة.`);
       setTab('profile');
     } catch (error) {
       setNotice(error.message);
@@ -646,6 +682,28 @@ function MirrorApp() {
             <Card title="العبارات والسياقات" icon="❝"><ul>{(profile.phrases || []).map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
              <Card title="المواقف حسب السياق" icon="⌘"><ul>{(profile.situations || []).map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
             <Card title="إشارات وحدود التحليل" icon="⚑"><ul>{[...(profile.signals || []), ...(profile.cautions || [])].map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
+             {isGroupSelection && participantAnalyses.length > 0 && (
+               <Card title="التحليل الفردي للمشاركين" icon="♙" wide>
+                 <div className="participant-grid">
+                   {participantAnalyses.map((participant, index) => (
+                     <article className="participant-card" key={participant.name || index}>
+                       <h3>{participant.name || `مشارك ${index + 1}`}</h3>
+                       {participant.communicationStyle?.length > 0 && <><b>نمط التواصل</b><ul>{participant.communicationStyle.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.behavioralTraits?.length > 0 && <><b>سمات ظاهرة</b><ul>{participant.behavioralTraits.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.openness && <p><b>الانفتاح والتحفظ:</b> {participant.openness}</p>}
+                       {participant.humorAndSeriousness && <p><b>المزاح والجدية والاختلاف:</b> {participant.humorAndSeriousness}</p>}
+                       {participant.groupInteractions?.length > 0 && <><b>التعامل مع المجموعة</b><ul>{participant.groupInteractions.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.comfortSignals?.length > 0 && <><b>مؤشرات الارتياح</b><ul>{participant.comfortSignals.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.tensionSignals?.length > 0 && <><b>مؤشرات التوتر</b><ul>{participant.tensionSignals.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.attentionSignals?.length > 0 && <><b>مؤشرات الاهتمام</b><ul>{participant.attentionSignals.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.possibleIntentions?.length > 0 && <><b>نوايا محتملة بصياغة احتمالية</b><ul>{participant.possibleIntentions.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.evidence?.length > 0 && <><b>الأدلة</b><ul>{participant.evidence.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                       {participant.cautions?.length > 0 && <><b>الحدود</b><ul>{participant.cautions.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></>}
+                     </article>
+                   ))}
+                 </div>
+               </Card>
+             )}
           </div>
         )}
 

@@ -77,7 +77,12 @@ function logError(req: Request, error: unknown) {
 router.post("/profile", async (req, res) => {
   if (aiUnavailable(res)) return;
   try {
-    const { herName, messages = [] } = req.body as { herName?: string; messages?: Message[] };
+    const { herName, messages = [], mode, participants = [] } = req.body as {
+      herName?: string;
+      messages?: Message[];
+      mode?: string;
+      participants?: string[];
+    };
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "لا توجد رسائل كافية لبناء البصمة." });
     }
@@ -85,6 +90,24 @@ router.post("/profile", async (req, res) => {
       .map((message, index) => `${index}|${safe(message.date, 40)} ${safe(message.time, 40)}|${safe(message.speaker, 120)}|${safe(message.text, 1000)}`)
       .join("\n")
       .slice(0, MAX_INPUT);
+    if (mode === "participant-batch" && Array.isArray(participants) && participants.length > 0) {
+      const participantList = participants
+        .map((participant, index) => `${index + 1}. ${safe(participant, 200)}`)
+        .join("\n");
+      const participantPrompt = `${BASE_INSTRUCTIONS}
+
+حلّل كل مشارك في مجموعة المحادثة بشكل مستقل، مع إبقاء التحليل احتماليًا ومبنياً على الدليل. أعد JSON فقط بهذا الشكل:
+{"participants":[{"name":"اسم مطابق للقائمة","communicationStyle":["نمط تواصل ظاهر"],"behavioralTraits":["سمة سلوكية أو لغوية قابلة للملاحظة وليست تشخيصاً"],"openness":"مستوى الانفتاح أو التحفظ مع الدليل","humorAndSeriousness":"طريقة المزاح والجدية والاختلاف مع الدليل","groupInteractions":["طريقة تعامله مع بقية المشاركين"],"comfortSignals":["يميل إلى الارتياح مع اسم: المؤشرات والدليل والثقة"],"tensionSignals":["يظهر توتراً مع اسم: المؤشرات والدليل والثقة"],"attentionSignals":["يعطي اهتماماً أو تفاعلاً أكبر مع اسم: المؤشرات والدليل والثقة"],"possibleIntentions":["قد يشير هذا السلوك إلى... الدليل... مستوى الثقة..."],"evidence":["أدلة موجزة من سياق المحادثة"],"cautions":["حدود هذا الاستنتاج"]}]}
+
+يجب إنشاء بطاقة مستقلة لكل اسم في القائمة، وعدم دمج المشاركين أو اختراع أسماء. استخدم محتوى الرسائل، الشخص الموجّه إليه الكلام، الردود المتبادلة، السياق السابق واللاحق، وتكرار السلوك وتغيره مع الأشخاص المختلفين. لا تستخدم «يحب» أو «يكره» كحقيقة مؤكدة؛ استخدم «يميل إلى الارتياح» أو «توجد مؤشرات على التوتر». لا تدّع معرفة النوايا الحقيقية، واجعل كل استنتاج احتماليًا مع سبب وثقة منخفضة أو متوسطة أو مرتفعة.
+
+المشاركون:
+${participantList}
+
+سياق المجموعة:
+${sample}`;
+      return res.json(parseJson(await generate(participantPrompt, true)));
+    }
     const prompt = `${BASE_INSTRUCTIONS}
 
 ابنِ بصمة أسلوبية مؤقتة للشخص المستهدف «${safe(herName, 200)}» من الرسائل أدناه. أعد JSON فقط بالمفاتيح التالية:
