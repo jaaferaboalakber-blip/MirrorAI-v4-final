@@ -4,6 +4,7 @@ import './styles.css';
 const META_KEY = 'mirat-style-v4-meta';
 const PERMANENT_MEMORY_KEY = 'mirat-style-v4-permanent-memory';
 const PRIVACY_MIGRATION_KEY = 'mirat-style-v4-privacy-migrated';
+const GROUP_TARGET = '__all_group_participants__';
 const DB_NAME = 'mirat-style-v4-db';
 const DB_VERSION = 1;
 const emptyProfile = {
@@ -117,7 +118,7 @@ function retrieve(query, memories, messages, her, limit = 18) {
     .map((memory) => ({ ...memory, _score: score(query, memory) }))
     .filter((memory) => memory._score > 0);
   const messageMatches = messages
-    .filter((message) => message.speaker === her)
+    .filter((message) => her === GROUP_TARGET || message.speaker === her)
     .map((message) => ({
       title: 'رسالة سابقة',
       category: 'رسالة مشابهة',
@@ -152,7 +153,7 @@ function makeWindows(messages, her, size = 40) {
   const output = [];
   for (let i = 0; i < messages.length; i += size) {
     const window = messages.slice(i, i + size);
-    if (window.some((message) => message.speaker === her)) output.push(window);
+    if (her === GROUP_TARGET || window.some((message) => message.speaker === her)) output.push(window);
   }
   return output;
 }
@@ -220,10 +221,49 @@ function MirrorApp() {
     () => [...new Set(messages.map((message) => message.speaker))].sort((a, b) => a.localeCompare(b)),
     [messages],
   );
+  const isGroupSelection = her === GROUP_TARGET;
   const herMessages = useMemo(
     () => messages.filter((message) => message.speaker === her),
     [messages, her],
   );
+  const selectedMessages = useMemo(
+    () => (isGroupSelection ? messages : herMessages),
+    [isGroupSelection, messages, herMessages],
+  );
+  const targetName = isGroupSelection ? 'المجموعة' : her;
+  const groupInsights = useMemo(() => {
+    if (!isGroupSelection || !messages.length) return null;
+    const counts = new Map(names.map((name) => [name, 0]));
+    const pairCounts = new Map();
+    let speakerChanges = 0;
+    messages.forEach((message, index) => {
+      counts.set(message.speaker, (counts.get(message.speaker) || 0) + 1);
+      const previous = messages[index - 1]?.speaker;
+      if (previous && previous !== message.speaker) {
+        speakerChanges += 1;
+        const pair = `${previous} → ${message.speaker}`;
+        pairCounts.set(pair, (pairCounts.get(pair) || 0) + 1);
+      }
+    });
+    const participantRows = [...counts.entries()]
+      .map(([name, count]) => ({
+        name,
+        count,
+        share: Math.round((count / messages.length) * 100),
+      }))
+      .sort((a, b) => b.count - a.count);
+    const interactionPairs = [...pairCounts.entries()]
+      .map(([pair, count]) => ({ pair, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    return {
+      participantRows,
+      participantCount: names.length,
+      messageCount: messages.length,
+      turnCount: messages.length ? speakerChanges + 1 : 0,
+      interactionPairs,
+    };
+  }, [isGroupSelection, messages, names]);
   const retrieved = useMemo(
     () => retrieve(question || chatInput, [...savedMemories, ...memories], messages, her, 18),
     [question, chatInput, savedMemories, memories, messages, her],
@@ -282,8 +322,8 @@ function MirrorApp() {
   }
 
   async function build() {
-    if (!herMessages.length) {
-      setNotice('اختر الشخص المراد تحليله أولاً.');
+    if (!selectedMessages.length) {
+      setNotice(isGroupSelection ? 'استورد محادثة المجموعة أولاً.' : 'اختر الشخص المراد تحليله أولاً.');
       setTab('data');
       return;
     }
@@ -294,13 +334,13 @@ function MirrorApp() {
       const profileResponse = await fetch('/api/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ herName: her, messages: sampleForProfile(herMessages) }),
+        body: JSON.stringify({ herName: targetName, messages: sampleForProfile(selectedMessages) }),
       });
       const profileData = await profileResponse.json();
       if (!profileResponse.ok) throw new Error(profileData.error || 'فشل البصمة');
       setProfile(profileData);
 
-      const windows = makeWindows(messages, her, 36);
+      const windows = makeWindows(messages, isGroupSelection ? GROUP_TARGET : her, 36);
       const selected =
         windows.length > 120
           ? windows.filter((_, index) => index % Math.ceil(windows.length / 120) === 0)
@@ -310,7 +350,7 @@ function MirrorApp() {
         const response = await fetch('/api/memory-batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ herName: her, messages: selected[index] }),
+          body: JSON.stringify({ herName: targetName, messages: selected[index] }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'فشل الذاكرة');
@@ -381,7 +421,7 @@ function MirrorApp() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          herName: her,
+          herName: targetName,
           question,
           profile,
           memory: retrieved.slice(0, 30),
@@ -410,7 +450,7 @@ function MirrorApp() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          herName: her,
+          herName: targetName,
           profile,
           memory: retrieve(message, allMemories, messages, her, 18),
           chat: next,
@@ -537,7 +577,7 @@ function MirrorApp() {
           <div className="chat-wrap">
             <div className="chatbox">
               <div className="chat-head">
-                <div><b>مساعد مرآة الأسلوب</b><small>{her ? `مرجع: ${her}` : 'أضف محادثة وحدد الشخص أولاً'}</small></div>
+                <div><b>مساعد مرآة الأسلوب</b><small>{her ? `مرجع: ${targetName}` : 'أضف محادثة وحدد الشخص أولاً'}</small></div>
                 <span>●</span>
               </div>
               <div className="messages">
@@ -614,7 +654,7 @@ function MirrorApp() {
              <Card title="الذاكرة الأسلوبية" icon="⌘" wide>
               <div className="stats">
                  <div><b>{messages.length.toLocaleString('ar')}</b><span>رسالة مؤقتة للجلسة</span></div>
-                 <div><b>{herMessages.length.toLocaleString('ar')}</b><span>رسالة للشخص المحدد</span></div>
+                  <div><b>{selectedMessages.length.toLocaleString('ar')}</b><span>{isGroupSelection ? 'رسالة في المجموعة' : 'رسالة للشخص المحدد'}</span></div>
                  <div><b>{savedMemories.length.toLocaleString('ar')}</b><span>موقف محفوظ دائماً</span></div>
                  <div><b>{memories.length.toLocaleString('ar')}</b><span>قرينة مؤقتة للجلسة</span></div>
               </div>
@@ -639,15 +679,28 @@ function MirrorApp() {
               {files.map((file, index) => <div className="file" key={index}><span>{file.name}</span><small>{Number(file.count || 0).toLocaleString('ar')} رسالة</small></div>)}
             </Card>
             <Card title="إعداد المشاركين والتحليل المؤقت" icon="♙">
-              <label>الشخص المراد تحليله<select value={her} onChange={(event) => setHer(event.target.value)}><option value="">اختر الاسم</option>{names.map((name) => <option key={name}>{name}</option>)}</select></label>
+              <label>{isGroupSelection ? 'المحادثة المراد تحليلها' : 'الشخص المراد تحليله'}<select value={her} onChange={(event) => setHer(event.target.value)}><option value="">اختر الاسم</option>{names.length > 1 && <option value={GROUP_TARGET}>كل المشاركين (المجموعة)</option>}{names.map((name) => <option key={name}>{name}</option>)}</select></label>
               <label>اسمك<input value={me} onChange={(event) => setMe(event.target.value)} placeholder="اختياري" /></label>
-              <button className="primary" onClick={build} disabled={busy || !herMessages.length}>حلّل مؤقتاً للجلسة</button>
+              <button className="primary" onClick={build} disabled={busy || !selectedMessages.length}>حلّل مؤقتاً للجلسة</button>
               <div className="privacy">المحادثات والبصمة والقرائن المستخرجة تبقى مؤقتة داخل هذه الجلسة ولا تُحفظ تلقائياً. اختر «حفظ بالذاكرة» فقط للمواقف التي تريد الاحتفاظ بها دائماً.</div>
               {memories.length > 0 && <button className="save-memory save-all" onClick={saveAllMemories}>حفظ نتائج الجلسة بالذاكرة</button>}
               <button className="danger" onClick={clearPermanentMemory} disabled={!savedMemories.length}>مسح الذاكرة الدائمة</button>
               <hr />
               <label className="backup">استرجاع نسخة احتياطية<input type="file" accept="application/json,.json" onChange={(event) => event.target.files[0] && importBackup(event.target.files[0])} /></label>
             </Card>
+            {isGroupSelection && groupInsights && (
+              <Card title="تفاعل المجموعة" icon="◌">
+                <div className="stats">
+                  <div><b>{groupInsights.participantCount.toLocaleString('ar')}</b><span>مشاركون مكتشفون</span></div>
+                  <div><b>{groupInsights.messageCount.toLocaleString('ar')}</b><span>رسالة في المجموعة</span></div>
+                  <div><b>{groupInsights.turnCount.toLocaleString('ar')}</b><span>تبادل أدوار</span></div>
+                </div>
+                <ul>
+                  {groupInsights.participantRows.map((item) => <li key={item.name}>{item.name}: {item.count.toLocaleString('ar')} رسالة ({item.share}٪)</li>)}
+                  {groupInsights.interactionPairs.length > 0 && <li>أكثر مسارات التفاعل تكراراً: {groupInsights.interactionPairs.map((item) => `${item.pair} (${item.count})`).join('، ')}</li>}
+                </ul>
+              </Card>
+            )}
           </div>
         )}
       </main>
