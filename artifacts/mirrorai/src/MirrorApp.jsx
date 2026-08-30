@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
 
 const META_KEY = 'mirat-style-v4-meta';
+const PERMANENT_MEMORY_KEY = 'mirat-style-v4-permanent-memory';
+const PRIVACY_MIGRATION_KEY = 'mirat-style-v4-privacy-migrated';
 const DB_NAME = 'mirat-style-v4-db';
 const DB_VERSION = 1;
 const emptyProfile = {
@@ -29,29 +31,6 @@ function openDB() {
         db.createObjectStore('messages', { keyPath: 'id' });
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function dbPutMany(items) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('messages', 'readwrite');
-    const store = tx.objectStore('messages');
-    items.forEach((item) => store.put(item));
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function dbGetAll() {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const request = db
-      .transaction('messages', 'readonly')
-      .objectStore('messages')
-      .getAll();
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -178,6 +157,10 @@ function makeWindows(messages, her, size = 40) {
   return output;
 }
 
+function memoryKey(memory) {
+  return [memory.category, memory.title, memory.herMessage, memory.context].join('|').toLowerCase();
+}
+
 function Card({ title, icon = '✦', children, wide = false }) {
   return (
     <section className={`card ${wide ? 'wide' : ''}`}>
@@ -197,6 +180,7 @@ function MirrorApp() {
   const [me, setMe] = useState('');
   const [profile, setProfile] = useState(emptyProfile);
   const [memories, setMemories] = useState([]);
+  const [savedMemories, setSavedMemories] = useState([]);
   const [tab, setTab] = useState('chat');
   const [question, setQuestion] = useState('');
   const [analysis, setAnalysis] = useState(null);
@@ -212,14 +196,13 @@ function MirrorApp() {
   useEffect(() => {
     (async () => {
       try {
-        const meta = JSON.parse(localStorage.getItem(META_KEY) || '{}');
-        setFiles(meta.files || []);
-        setHer(meta.her || '');
-        setMe(meta.me || '');
-        setProfile(meta.profile || emptyProfile);
-        setMemories(meta.memories || []);
-        setChat(meta.chat || []);
-        setMessages(await dbGetAll());
+        const saved = JSON.parse(localStorage.getItem(PERMANENT_MEMORY_KEY) || '[]');
+        setSavedMemories(Array.isArray(saved) ? saved : []);
+        localStorage.removeItem(META_KEY);
+        if (!localStorage.getItem(PRIVACY_MIGRATION_KEY)) {
+          await dbClear();
+          localStorage.setItem(PRIVACY_MIGRATION_KEY, '1');
+        }
       } catch (error) {
         setNotice(`تعذر فتح الذاكرة المحلية: ${error.message}`);
       } finally {
@@ -230,11 +213,8 @@ function MirrorApp() {
 
   useEffect(() => {
     if (!ready) return;
-    localStorage.setItem(
-      META_KEY,
-      JSON.stringify({ files, her, me, profile, memories, chat }),
-    );
-  }, [files, her, me, profile, memories, chat, ready]);
+    localStorage.setItem(PERMANENT_MEMORY_KEY, JSON.stringify(savedMemories));
+  }, [savedMemories, ready]);
 
   const names = useMemo(
     () => [...new Set(messages.map((message) => message.speaker))].sort((a, b) => a.localeCompare(b)),
@@ -245,18 +225,22 @@ function MirrorApp() {
     [messages, her],
   );
   const retrieved = useMemo(
-    () => retrieve(question || chatInput, memories, messages, her, 18),
-    [question, chatInput, memories, messages, her],
+    () => retrieve(question || chatInput, [...savedMemories, ...memories], messages, her, 18),
+    [question, chatInput, savedMemories, memories, messages, her],
+  );
+  const allMemories = useMemo(
+    () => [...savedMemories, ...memories],
+    [savedMemories, memories],
   );
   const visibleMemory = useMemo(() => {
     const query = search.trim();
     return query
-      ? memories
+      ? allMemories
           .map((memory) => ({ ...memory, _score: score(query, memory) }))
           .filter((memory) => memory._score > 0)
           .sort((a, b) => b._score - a._score)
-      : memories;
-  }, [search, memories]);
+      : allMemories;
+  }, [search, allMemories]);
 
   async function importFiles(list) {
     const textFiles = [...list].filter((file) => /\.txt$/i.test(file.name));
@@ -284,8 +268,7 @@ function MirrorApp() {
         });
         newMeta.push({ name: file.name, count: unique, addedAt: new Date().toISOString() });
       }
-      await dbPutMany(added);
-      setMessages(await dbGetAll());
+      setMessages((current) => [...current, ...added]);
       setFiles((previous) => [...previous, ...newMeta]);
       if (!her && added[0]) setHer(added[0].speaker);
       setNotice(`تمت إضافة ${added.length.toLocaleString('ar')} رسالة جديدة.`);
@@ -300,13 +283,13 @@ function MirrorApp() {
 
   async function build() {
     if (!herMessages.length) {
-      setNotice('اختر اسم زوجتك أولاً.');
+      setNotice('اختر الشخص المراد تحليله أولاً.');
       setTab('data');
       return;
     }
     setBusy(true);
     setProgress(0);
-    setNotice('جاري بناء البصمة والذاكرة…');
+      setNotice('جاري بناء تحليل مؤقت للجلسة…');
     try {
       const profileResponse = await fetch('/api/profile', {
         method: 'POST',
@@ -342,13 +325,47 @@ function MirrorApp() {
         }
       });
       setMemories([...deduped.values()].slice(0, 1200));
-      setNotice(`اكتملت البصمة والذاكرة: ${deduped.size.toLocaleString('ar')} موقفاً.`);
+      setNotice(`اكتمل التحليل المؤقت: ${deduped.size.toLocaleString('ar')} قرينة. لم تُحفظ بالذاكرة الدائمة.`);
       setTab('profile');
     } catch (error) {
       setNotice(error.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  function saveMemory(memory) {
+    setSavedMemories((current) => {
+      const key = memoryKey(memory);
+      if (current.some((item) => memoryKey(item) === key)) return current;
+      return [...current, { ...memory }];
+    });
+    setMemories((current) => current.filter((item) => memoryKey(item) !== memoryKey(memory)));
+    setNotice('تم حفظ هذا الموقف بالذاكرة الدائمة.');
+  }
+
+  function saveAllMemories() {
+    if (!memories.length) return;
+    setSavedMemories((current) => {
+      const next = [...current];
+      const keys = new Set(next.map(memoryKey));
+      memories.forEach((memory) => {
+        const key = memoryKey(memory);
+        if (!keys.has(key)) {
+          next.push({ ...memory });
+          keys.add(key);
+        }
+      });
+      return next;
+    });
+    setMemories([]);
+    setNotice('تم حفظ نتائج الجلسة بالذاكرة الدائمة بناءً على طلبك.');
+  }
+
+  function clearPermanentMemory() {
+    if (!window.confirm('سيتم حذف الذاكرة الدائمة المحفوظة فقط. هل أنت متأكد؟')) return;
+    setSavedMemories([]);
+    setNotice('تم مسح الذاكرة الدائمة. نتائج الجلسة المؤقتة لم تُحفظ.');
   }
 
   async function analyze() {
@@ -358,7 +375,7 @@ function MirrorApp() {
     }
     setBusy(true);
     setAnalysis(null);
-    setNotice('جاري مقارنة الموقف بذاكرتها…');
+    setNotice('جاري مقارنة الموقف بالسياق السابق…');
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -395,7 +412,7 @@ function MirrorApp() {
         body: JSON.stringify({
           herName: her,
           profile,
-          memory: retrieve(message, memories, messages, her, 18),
+          memory: retrieve(message, allMemories, messages, her, 18),
           chat: next,
           message,
         }),
@@ -414,17 +431,28 @@ function MirrorApp() {
   }
 
   async function clearAll() {
-    if (!window.confirm('سيتم حذف الرسائل والذاكرة والإعدادات من هذا الجهاز. هل أنت متأكد؟')) {
+    if (!window.confirm('سيتم حذف بيانات الجلسة والذاكرة الدائمة من هذا الجهاز. هل أنت متأكد؟')) {
       return;
     }
     await dbClear();
     localStorage.removeItem(META_KEY);
-    window.location.reload();
+    localStorage.removeItem(PERMANENT_MEMORY_KEY);
+    setSavedMemories([]);
+    setMessages([]);
+    setFiles([]);
+    setHer('');
+    setMe('');
+    setProfile(emptyProfile);
+    setMemories([]);
+    setChat([]);
+    setQuestion('');
+    setAnalysis(null);
+    setNotice('تم مسح بيانات الجلسة والذاكرة الدائمة.');
   }
 
   function exportBackup() {
     const blob = new Blob(
-      [JSON.stringify({ version: 4, files, her, me, profile, memories, chat, messages }, null, 2)],
+      [JSON.stringify({ version: 5, files, her, me, profile, temporaryMemories: memories, savedMemories, chat, messages }, null, 2)],
       { type: 'application/json' },
     );
     const url = URL.createObjectURL(blob);
@@ -440,15 +468,15 @@ function MirrorApp() {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.messages)) throw new Error('ملف النسخة الاحتياطية غير صالح');
       await dbClear();
-      await dbPutMany(data.messages);
       setMessages(data.messages);
       setFiles(data.files || []);
       setHer(data.her || '');
       setMe(data.me || '');
       setProfile(data.profile || emptyProfile);
-      setMemories(data.memories || []);
+      setMemories(data.temporaryMemories || data.memories || []);
+      setSavedMemories(Array.isArray(data.savedMemories) ? data.savedMemories : []);
       setChat(data.chat || []);
-      setNotice('تم استرجاع النسخة الاحتياطية بنجاح.');
+      setNotice('تم استرجاع النسخة الاحتياطية إلى الجلسة. اضغط حفظ بالذاكرة لأي موقف تريد الاحتفاظ به دائماً.');
     } catch (error) {
       setNotice(`فشل الاسترجاع: ${error.message}`);
     }
@@ -484,7 +512,7 @@ function MirrorApp() {
           <div>
             <span className="eyebrow">يتعلم من السياق الحقيقي، لا من التخمين</span>
             <h1>مو بس يفسّر رسالة.<br /><em>يتذكر السياق أيضاً.</em></h1>
-            <p>ارفع محادثات واتساب القديمة. التطبيق يفهرسها محلياً، يبني بصمة لأسلوبها، ثم يسترجع المواقف الأقرب قبل كل تحليل.</p>
+            <p>ارفع محادثات واتساب لتحليلها مؤقتاً. التطبيق يبني بصمة للجلسة، ثم يسترجع المواقف الأقرب قبل كل تحليل دون حفظ تلقائي.</p>
           </div>
           <div className="orb" aria-hidden="true">✦</div>
         </div>
@@ -493,8 +521,8 @@ function MirrorApp() {
           {[
             ['chat', 'المحادثة'],
             ['analyze', 'تحليل موقف'],
-            ['profile', 'بصمتها'],
-            ['memory', <>الذاكرة <i>{memories.length}</i></>],
+            ['profile', 'البصمة'],
+            ['memory', <>الذاكرة <i>{savedMemories.length}</i></>],
             ['data', 'البيانات'],
           ].map(([value, label]) => (
             <button key={value} className={tab === value ? 'on' : ''} onClick={() => setTab(value)}>
@@ -517,10 +545,10 @@ function MirrorApp() {
                   <div className="welcome">
                     <div className="welcome-icon" aria-hidden="true">✦</div>
                     <h2>شلون أساعدك؟</h2>
-                    <p>اسألني عن رد، موقف، أو طريقة مناسبة للرد عليها.</p>
+                    <p>اسألني عن رد، موقف، أو طريقة مناسبة للرد.</p>
                     <div className="quick">
-                      <button onClick={() => setChatInput('شنو أكثر الأشياء اللي تميز أسلوب كلامها؟')}>حلل أسلوبها</button>
-                      <button onClick={() => setChatInput('هل هي زعلانة من هذا الرد؟ وما الأدلة؟')}>هل هي زعلانة؟</button>
+                      <button onClick={() => setChatInput('شنو أكثر الأشياء اللي تميز أسلوب كلام الشخص؟')}>حلل الأسلوب</button>
+                      <button onClick={() => setChatInput('هل يبدو الشخص منزعجاً من هذا الرد؟ وما الأدلة؟')}>هل يبدو منزعجاً؟</button>
                       <button onClick={() => setChatInput('شنو أفضل رد طبيعي على هذا الموقف؟')}>شنو أرد؟</button>
                     </div>
                   </div>
@@ -549,8 +577,8 @@ function MirrorApp() {
         {tab === 'analyze' && (
           <div className="two">
             <Card title="الموقف الجديد" icon="⌁">
-              <textarea className="bigtext" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={'الصق المحادثة هنا…\nأنا: ...\nهي: ...'} aria-label="الموقف الجديد" />
-              <button className="primary" onClick={analyze} disabled={busy || !question.trim()}>حلّل مقارنةً بذاكرتها ✦</button>
+               <textarea className="bigtext" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={'الصق المحادثة هنا…\nأنا: ...\nالشخص: ...'} aria-label="الموقف الجديد" />
+               <button className="primary" onClick={analyze} disabled={busy || !question.trim()}>حلّل مقارنةً بالسياق السابق ✦</button>
               {retrieved.length > 0 && <div className="retrieval"><small>استرجاع محلي: {retrieved.length} قرائن مرتبطة.</small>{retrieved.slice(0, 5).map((memory, index) => <span key={index}>{memory.title}</span>)}</div>}
             </Card>
             {analysis && (
@@ -573,40 +601,50 @@ function MirrorApp() {
 
         {tab === 'profile' && (
           <div className="profile">
-            <Card title="الخلاصة" icon="✦" wide><p className="summary">{profile.summary || 'لم تُبنَ البصمة بعد. اذهب إلى البيانات ثم اضغط بناء/تحديث.'}</p><div className="chips">{(profile.styleFingerprint || []).map((item, index) => <span key={index}>{item}</span>)}</div></Card>
+             <Card title="الخلاصة المؤقتة" icon="✦" wide><p className="summary">{profile.summary || 'لم يُبنَ التحليل بعد. اذهب إلى البيانات ثم اضغط تحليل مؤقت.'}</p><div className="chips">{(profile.styleFingerprint || []).map((item, index) => <span key={index}>{item}</span>)}</div><p className="muted">هذه البصمة تخص الجلسة الحالية فقط ولا تُحفظ في الذاكرة الدائمة تلقائياً.</p></Card>
             <Card title="الأنماط المتكررة" icon="↻"><ul>{(profile.patterns || []).map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
             <Card title="العبارات والسياقات" icon="❝"><ul>{(profile.phrases || []).map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
-            <Card title="مواقفها حسب السياق" icon="⌘"><ul>{(profile.situations || []).map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
+             <Card title="المواقف حسب السياق" icon="⌘"><ul>{(profile.situations || []).map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
             <Card title="إشارات وحدود التحليل" icon="⚑"><ul>{[...(profile.signals || []), ...(profile.cautions || [])].map((item, index) => <li key={index}>{item}</li>)}</ul></Card>
           </div>
         )}
 
         {tab === 'memory' && (
           <div className="memory-page">
-            <Card title="الذاكرة الأسلوبية" icon="⌘" wide>
+             <Card title="الذاكرة الأسلوبية" icon="⌘" wide>
               <div className="stats">
-                <div><b>{messages.length.toLocaleString('ar')}</b><span>رسالة مفهرسة محلياً</span></div>
-                <div><b>{herMessages.length.toLocaleString('ar')}</b><span>رسالة لها</span></div>
-                <div><b>{memories.length.toLocaleString('ar')}</b><span>موقف أسلوبي</span></div>
+                 <div><b>{messages.length.toLocaleString('ar')}</b><span>رسالة مؤقتة للجلسة</span></div>
+                 <div><b>{herMessages.length.toLocaleString('ar')}</b><span>رسالة للشخص المحدد</span></div>
+                 <div><b>{savedMemories.length.toLocaleString('ar')}</b><span>موقف محفوظ دائماً</span></div>
+                 <div><b>{memories.length.toLocaleString('ar')}</b><span>قرينة مؤقتة للجلسة</span></div>
               </div>
               <input className="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث داخل الذاكرة…" aria-label="البحث داخل الذاكرة" />
-              <p className="muted">البحث والاسترجاع الأولي يعملان محلياً، ثم تُرسل القرائن المختارة فقط إلى نموذج الذكاء الاصطناعي عند التحليل.</p>
+               <p className="muted">المحادثة والبصمة والقرائن المستخرجة مؤقتة للجلسة. لا تُضاف الذاكرة الدائمة إلا بعد ضغط «حفظ بالذاكرة» صراحةً.</p>
+               <div className="memory-actions">
+                 {memories.length > 0 && <button className="primary compact" onClick={saveAllMemories}>حفظ نتائج الجلسة بالذاكرة</button>}
+                 <button className="danger" onClick={clearPermanentMemory} disabled={!savedMemories.length}>مسح الذاكرة الدائمة</button>
+               </div>
             </Card>
-            <div className="memory-grid">{visibleMemory.slice(0, 160).map((memory, index) => <Card key={index} title={memory.title || 'موقف'} icon="•"><span className="cat">{memory.category}</span><p>{memory.context}</p>{memory.herMessage && <blockquote>«{memory.herMessage}»</blockquote>}<small>{memory.responsePattern}</small></Card>)}</div>
+             <div className="memory-grid">{visibleMemory.slice(0, 160).map((memory, index) => {
+               const isSaved = savedMemories.some((item) => memoryKey(item) === memoryKey(memory));
+               return <Card key={index} title={memory.title || 'موقف'} icon="•"><span className={`cat ${isSaved ? 'saved' : 'temporary'}`}>{isSaved ? 'محفوظ دائماً' : 'مؤقت للجلسة'}</span><p>{memory.context}</p>{memory.herMessage && <blockquote>«{memory.herMessage}»</blockquote>}<small>{memory.responsePattern}</small>{!isSaved && <button className="save-memory" onClick={() => saveMemory(memory)}>حفظ بالذاكرة</button>}</Card>;
+             })}</div>
           </div>
         )}
 
         {tab === 'data' && (
           <div className="two">
             <Card title="محادثات واتساب" icon="▣">
-              <div className="drop" onClick={() => fileRef.current?.click()} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && fileRef.current?.click()}><b>＋ أضف ملفات TXT</b><small>يدعم عدة ملفات ويزيل الرسائل المكررة. كل الرسائل تُفهرس محلياً.</small></div>
+               <div className="drop" onClick={() => fileRef.current?.click()} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && fileRef.current?.click()}><b>＋ أضف ملفات TXT</b><small>يدعم عدة ملفات ويزيل الرسائل المكررة. كل البيانات مؤقتة للجلسة.</small></div>
               {files.map((file, index) => <div className="file" key={index}><span>{file.name}</span><small>{Number(file.count || 0).toLocaleString('ar')} رسالة</small></div>)}
             </Card>
-            <Card title="إعداد المشاركين وبناء الذاكرة" icon="♙">
-              <label>زوجتك<select value={her} onChange={(event) => setHer(event.target.value)}><option value="">اختر الاسم</option>{names.map((name) => <option key={name}>{name}</option>)}</select></label>
+            <Card title="إعداد المشاركين والتحليل المؤقت" icon="♙">
+              <label>الشخص المراد تحليله<select value={her} onChange={(event) => setHer(event.target.value)}><option value="">اختر الاسم</option>{names.map((name) => <option key={name}>{name}</option>)}</select></label>
               <label>اسمك<input value={me} onChange={(event) => setMe(event.target.value)} placeholder="اختياري" /></label>
-              <button className="primary" onClick={build} disabled={busy || !herMessages.length}>ابنِ / حدّث البصمة والذاكرة</button>
-              <div className="privacy">المحادثات الخام محفوظة في IndexedDB داخل جهازك. لا تُرسل تلقائياً. عند البناء/التحليل، تُرسل عينات وقرائن لازمة فقط إلى خادم الذكاء الاصطناعي.</div>
+              <button className="primary" onClick={build} disabled={busy || !herMessages.length}>حلّل مؤقتاً للجلسة</button>
+              <div className="privacy">المحادثات والبصمة والقرائن المستخرجة تبقى مؤقتة داخل هذه الجلسة ولا تُحفظ تلقائياً. اختر «حفظ بالذاكرة» فقط للمواقف التي تريد الاحتفاظ بها دائماً.</div>
+              {memories.length > 0 && <button className="save-memory save-all" onClick={saveAllMemories}>حفظ نتائج الجلسة بالذاكرة</button>}
+              <button className="danger" onClick={clearPermanentMemory} disabled={!savedMemories.length}>مسح الذاكرة الدائمة</button>
               <hr />
               <label className="backup">استرجاع نسخة احتياطية<input type="file" accept="application/json,.json" onChange={(event) => event.target.files[0] && importBackup(event.target.files[0])} /></label>
             </Card>

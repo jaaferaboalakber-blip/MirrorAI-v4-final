@@ -87,7 +87,7 @@ router.post("/profile", async (req, res) => {
       .slice(0, MAX_INPUT);
     const prompt = `${BASE_INSTRUCTIONS}
 
-ابنِ بصمة أسلوبية للشخص «${safe(herName, 200)}» من الرسائل أدناه. أعد JSON فقط بالمفاتيح التالية:
+ابنِ بصمة أسلوبية مؤقتة للشخص المستهدف «${safe(herName, 200)}» من الرسائل أدناه. أعد JSON فقط بالمفاتيح التالية:
 {"summary":"خلاصة قصيرة","styleFingerprint":["سمات لغوية قابلة للملاحظة"],"patterns":["أنماط متكررة"],"phrases":["عبارات أو صيغ مميزة"],"signals":["إشارات سياقية"],"cautions":["حدود وتحذيرات"],"situations":["اختلاف الأسلوب حسب الموقف"],"examples":["أمثلة مقتضبة من النص"]}
 كل عنصر مختصر ومفيد. لا تخترع معلومات ولا تحول الاحتمال إلى حقيقة.
 
@@ -111,7 +111,7 @@ router.post("/memory-batch", async (req, res) => {
       .slice(0, MAX_INPUT);
     const prompt = `${BASE_INSTRUCTIONS}
 
-استخرج بطاقات ذاكرة أسلوبية من هذه الدفعة من محادثة «${safe(herName, 200)}». اختر فقط المواقف الواضحة التي يمكن الرجوع إليها لاحقاً عند تحليل موقف جديد، ولا تلخص كل الرسائل. ركز على اختلاف أسلوبها حسب السياق. category يجب أن تكون واحدة من: حب/اهتمام، زعل/انزعاج، خلاف، اعتذار/مصالحة، مزاح، غيرة/حساسية، طلب/احتياج، عادي، غير واضح. herMessage مقتطف قصير لا يتجاوز 30 كلمة. confidence بين 0 و100. الحد الأقصى 20 بطاقة. أعد JSON فقط بهذا الشكل:
+استخرج قرائن أسلوبية مؤقتة من هذه الدفعة من محادثة الشخص المستهدف «${safe(herName, 200)}». اختر فقط المواقف الواضحة التي يمكن الرجوع إليها لاحقاً عند تحليل موقف جديد، ولا تلخص كل الرسائل. ركز على اختلاف أسلوب الشخص حسب السياق. category يجب أن تكون واحدة من: حب/اهتمام، زعل/انزعاج، خلاف، اعتذار/مصالحة، مزاح، غيرة/حساسية، طلب/احتياج، عادي، غير واضح. herMessage مقتطف قصير لا يتجاوز 30 كلمة. confidence بين 0 و100. الحد الأقصى 20 بطاقة. هذه النتائج مؤقتة ولا تعني حفظاً دائماً. أعد JSON فقط بهذا الشكل:
 {"memories":[{"title":"عنوان","category":"التصنيف","trigger":"المحفز","context":"السياق","herMessage":"مقتطف","responsePattern":"النمط","keywords":["كلمات"],"evidence":"الدليل","confidence":75}]}
 لا تخترع معلومات.
 
@@ -135,12 +135,12 @@ router.post("/analyze", async (req, res) => {
     };
     if (!question?.trim()) return res.status(400).json({ error: "أدخل الموقف أولاً." });
     const memoryText = memory
-      .map((item, index) => `#${index + 1} [${safe(item.category, 80)}] ${safe(item.title, 200)}\nالسياق: ${safe(item.context, 1000)}\nرسالتها: ${safe(item.herMessage, 500)}\nالنمط: ${safe(item.responsePattern, 500)}\nالكلمات: ${(item.keywords || []).join(", ")}\nالدليل: ${safe(item.evidence, 500)}`)
+      .map((item, index) => `#${index + 1} [${safe(item.category, 80)}] ${safe(item.title, 200)}\nالسياق: ${safe(item.context, 1000)}\nرسالة الشخص: ${safe(item.herMessage, 500)}\nالنمط: ${safe(item.responsePattern, 500)}\nالكلمات: ${(item.keywords || []).join(", ")}\nالدليل: ${safe(item.evidence, 500)}`)
       .join("\n\n")
       .slice(0, 140_000);
     const prompt = `${BASE_INSTRUCTIONS}
 
-حلّل الموقف الجديد مع «${safe(herName, 200)}» باستخدام ملف الأسلوب وبطاقات الذاكرة كقرائن، وليس كحقائق عن النية. أعد JSON فقط بهذا الشكل:
+حلّل الموقف الجديد مع الشخص المستهدف «${safe(herName, 200)}» باستخدام ملف الأسلوب وبطاقات الذاكرة كقرائن، وليس كحقائق عن النية. أعد JSON فقط بهذا الشكل:
 {"likelyState":"القراءة الأقرب","confidence":75,"interpretation":"تفسير احتمالي","evidence":["أدلة من النص أو الذاكرة"],"similarPatterns":["أنماط مشابهة"],"alternatives":["احتمالات أخرى"],"suggestedResponses":["رد طبيعي ومحترم","رد طبيعي بديل"],"whatNotToDo":["أشياء يفضل تجنبها"],"uncertainty":"ما الذي لا يمكن الجزم به"}
 إذا كان النص غير كافٍ، قل ذلك وخفّض الثقة. اقترح ردوداً طبيعية ومحترمة وغير متلاعبة.
 
@@ -171,7 +171,7 @@ router.post("/chat", async (req, res) => {
     };
     if (!message?.trim()) return res.status(400).json({ error: "اكتب سؤالك." });
     const memoryText = memory
-      .map((item, index) => `#${index + 1} [${safe(item.category, 80)}] ${safe(item.title, 200)}: ${safe(item.context, 1000)} | هي: ${safe(item.herMessage, 500)} | النمط: ${safe(item.responsePattern, 500)}`)
+      .map((item, index) => `#${index + 1} [${safe(item.category, 80)}] ${safe(item.title, 200)}: ${safe(item.context, 1000)} | رسالة الشخص: ${safe(item.herMessage, 500)} | النمط: ${safe(item.responsePattern, 500)}`)
       .join("\n")
       .slice(0, 90_000);
     const conversation = chat
@@ -182,7 +182,7 @@ router.post("/chat", async (req, res) => {
 
 أنت المساعد داخل «مرآة الأسلوب». أجب بالعربية العراقية الطبيعية عندما تناسب. اعتمد على ملف الأسلوب والذكريات المسترجعة وسياق الدردشة. إذا سأل المستخدم «شنو تقصد؟» أعطه القراءة الأقرب ثم الدليل والبدائل. إذا سأل «شنو أرد؟» اقترح ردوداً طبيعية ومحترمة وغير متلاعبة. لا تقل إنك تعرف ما في داخلها. لا تحوّل الذاكرة إلى تشخيص أو حكم.
 
-الشخص: ${safe(herName, 200)}
+الشخص المستهدف: ${safe(herName, 200)}
 ملف الأسلوب: ${JSON.stringify(profile).slice(0, 50_000)}
 الذكريات المسترجعة:
 ${memoryText}
