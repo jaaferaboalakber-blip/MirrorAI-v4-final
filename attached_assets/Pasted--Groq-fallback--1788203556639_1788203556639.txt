@@ -1,0 +1,185 @@
+موافق على التنفيذ.
+
+نفّذ إضافة Groq كـfallback حسب تقرير الفحص، وبأقل تغيير ممكن.
+
+التنفيذ المطلوب
+
+أنشئ:
+
+artifacts/api-server/src/lib/ai-provider.ts
+
+واجعلها طبقة AI Provider مركزية تحتوي على:
+
+* Gemini كـprimary.
+* Groq كـfallback.
+* استخدام GEMINI_API_KEY.
+* استخدام GROQ_API_KEY.
+* عدم وضع أي API key داخل الكود.
+
+عدّل فقط ما يلزم في:
+
+artifacts/api-server/src/routes/gemini.ts
+
+بحيث تبقى جميع الـroutes والـprompts والـresponse contracts كما هي.
+
+السلوك المطلوب
+
+لكل طلب:
+
+Gemini
+  ↓
+نجح → النتيجة
+فشل بسبب 429/quota/rate limit أو خطأ مؤقت مؤهل
+  ↓
+Groq
+  ↓
+النتيجة
+
+لا ترسل الطلب إلى Gemini وGroq معًا.
+
+ولا تستخدم retries متعددة.
+
+Fallback المسموح
+
+فعّل fallback عند:
+
+* HTTP 429
+* RESOURCE_EXHAUSTED
+* quota
+* rate limit
+* rate_limit_exceeded
+* 502
+* 503
+* 504
+* أخطاء الشبكة المؤقتة الواضحة مثل:
+    * ECONNRESET
+    * ETIMEDOUT
+    * ECONNREFUSED
+    * EAI_AGAIN
+    * fetch failed
+
+لا تعمل fallback عند:
+
+* 400
+* 401
+* 403
+* 404
+* validation errors
+* أخطاء التطبيق المحلية
+* أخطاء parseJson() بعد وصول استجابة Gemini
+
+Groq
+
+استخدم Groq API الرسمي مباشرة عبر fetch بدون dependency جديدة إذا كان ذلك ممكنًا.
+
+استخدم نموذجًا متاحًا حاليًا ومناسبًا للتحليل العربي وPersona.
+
+التفضيل المبدئي:
+
+llama-3.3-70b-versatile
+
+لكن تحقق من توفره قبل تثبيته في الكود.
+
+JSON
+
+عندما يكون:
+
+json === true
+
+استخدم Groq structured JSON / JSON object mode المناسب.
+
+ثم مرر النص الناتج إلى parseJson() الحالية.
+
+لا تغير JSON contracts الحالية.
+
+الحفاظ على كل الوظائف
+
+يجب أن تعمل Groq fallback مع:
+
+* /api/profile
+* persona-build
+* participant-batch
+* /api/memory-batch
+* /api/analyze
+* /api/chat
+* persona
+
+بدون تغيير الـAPI contracts.
+
+ولا تعدّل:
+
+* WhatsApp parser
+* sampling/batching
+* memory system
+* participant analysis
+* Persona logic
+* personaChat
+* cache
+* UI
+* التصميم
+* Gemini settings
+
+مهم جدًا للـPersona
+
+لا تغير أي Prompt خاص بالـPersona.
+
+إذا فشل Gemini أثناء persona-build بسبب quota، يجب أن يستطيع نفس الطلب الانتقال إلى Groq.
+
+ونفس الشيء مع /api/chat في:
+
+mode: "persona"
+
+Secrets
+
+لا تنشئ المفتاح بنفسك.
+
+اجعل التطبيق يقرأ:
+
+process.env.GROQ_API_KEY
+
+وأنا سأضيف الـSecret يدويًا في Replit.
+
+لا تطبع قيمة المفتاح في logs.
+
+Error handling
+
+إذا فشل Gemini بسبب quota ثم فشل Groq أيضًا:
+
+* أرجع خطأ واضحًا للواجهة.
+* لا تعمل حلقة retries.
+* لا تخفي الخطأ الحقيقي.
+
+وإذا لم يكن GROQ_API_KEY موجودًا، يبقى Gemini يعمل طبيعيًا، وإذا فشل Gemini يظهر الخطأ المناسب.
+
+الاختبارات
+
+بعد التنفيذ اختبر:
+
+1. typecheck
+2. build API
+3. build الواجهة
+4. /api/healthz
+5. /api/profile
+6. /api/memory-batch
+7. participant-batch
+8. persona-build
+9. /api/chat العادي
+10. /api/chat مع mode: "persona"
+11. JSON parsing
+12. التأكد أن Gemini الناجح لا يستدعي Groq.
+13. محاكاة/اختبار Gemini 429 والتأكد أن Groq يتم استدعاؤه مرة واحدة فقط.
+14. التأكد أن Gemini 401/400 لا يسبب fallback.
+15. التأكد من عدم تسريب API keys في logs أو الواجهة.
+
+إذا كان الاختبار الحقيقي مع Gemini/Groq غير ممكن بسبب عدم وجود GROQ_API_KEY بعد، لا تفشل التنفيذ بسببه؛ اختبر منطق الـprovider باستخدام mocks أو اختبارات محلية.
+
+وفي النهاية أعطني:
+
+* الملفات التي تغيرت.
+* النموذج المستخدم.
+* حالات fallback.
+* نتائج الاختبارات.
+* هل تم التأكد أن الطلب الناجح من Gemini لا يصل إلى Groq.
+* هل تم التأكد أن 429 ينتقل إلى Groq.
+
+نفّذ الآن.

@@ -1,8 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
 import { Router, type IRouter, type Request, type Response } from "express";
+import { generate, hasConfiguredProvider, summarizeAiError } from "../lib/ai-provider";
 
 const router: IRouter = Router();
-const MODEL = "gemini-3.6-flash";
 const MAX_INPUT = 220_000;
 
 const BASE_INSTRUCTIONS = `أنت «مرآة الأسلوب»: محلل محادثات دقيق. تدرس النص والسياق والأنماط المتكررة، ولا تدّعي قراءة الأفكار أو معرفة النوايا الداخلية. افصل الدليل عن الاستنتاج. لا تشخّص نفسياً ولا تحكم أخلاقياً ولا تحاول إثارة الغيرة أو الشك. لا تجعل نمطاً عابراً صفة ثابتة. عند تعارض القرائن اذكر التعارض. استخدم العربية العراقية الطبيعية عندما تناسب المستخدم. احترم الخصوصية ولا تطلب بيانات لا تحتاجها.`;
@@ -26,11 +25,6 @@ type Memory = {
   confidence?: number;
 };
 
-function getClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  return apiKey ? new GoogleGenAI({ apiKey }) : null;
-}
-
 function safe(value: unknown, limit = MAX_INPUT) {
   return String(value ?? "").slice(0, limit);
 }
@@ -52,26 +46,22 @@ function parseJson(text: string) {
 }
 
 function aiUnavailable(res: Response) {
-  if (getClient()) return false;
+  if (hasConfiguredProvider()) return false;
   res.status(503).json({
-    error: "الذكاء الاصطناعي غير مفعّل. أضف GEMINI_API_KEY في Secrets.",
+    error: "الذكاء الاصطناعي غير مفعّل. أضف GEMINI_API_KEY أو GROQ_API_KEY في Secrets.",
   });
   return true;
 }
 
-async function generate(prompt: string, json = false) {
-  const client = getClient();
-  if (!client) throw new Error("GEMINI_API_KEY غير مفعّل.");
-  const response = await client.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: json ? { responseMimeType: "application/json", maxOutputTokens: 8192 } : { maxOutputTokens: 8192 },
-  });
-  return response.text || "";
+function logError(req: Request, error: unknown) {
+  req.log.error({ providerError: summarizeAiError(error) }, "AI request failed");
 }
 
-function logError(req: Request, error: unknown) {
-  req.log.error({ err: error }, "Gemini request failed");
+function publicAiError(error: unknown, fallback: string) {
+  const summary = summarizeAiError(error);
+  return summary === "خطأ غير مصنف من مزود الذكاء الاصطناعي"
+    ? fallback
+    : `${fallback} (${summary}).`;
 }
 
 router.post("/profile", async (req, res) => {
@@ -143,7 +133,7 @@ ${sample}`;
     return res.json(parseJson(await generate(prompt, true)));
   } catch (error) {
     logError(req, error);
-    return res.status(500).json({ error: "فشل بناء البصمة باستخدام Gemini." });
+    return res.status(500).json({ error: publicAiError(error, "فشل بناء البصمة باستخدام الذكاء الاصطناعي.") });
   }
 });
 
@@ -167,7 +157,7 @@ ${sample}`;
     return res.json(parseJson(await generate(prompt, true)));
   } catch (error) {
     logError(req, error);
-    return res.status(500).json({ error: "فشل استخراج الذاكرة باستخدام Gemini." });
+    return res.status(500).json({ error: publicAiError(error, "فشل استخراج الذاكرة باستخدام الذكاء الاصطناعي.") });
   }
 });
 
@@ -202,7 +192,7 @@ ${safe(question, 70_000)}`;
     return res.json(parseJson(await generate(prompt, true)));
   } catch (error) {
     logError(req, error);
-    return res.status(500).json({ error: "فشل تحليل الموقف باستخدام Gemini." });
+    return res.status(500).json({ error: publicAiError(error, "فشل تحليل الموقف باستخدام الذكاء الاصطناعي.") });
   }
 });
 
@@ -259,7 +249,7 @@ ${conversation}
     return res.json({ answer: await generate(prompt) });
   } catch (error) {
     logError(req, error);
-    return res.status(500).json({ error: "فشل الرد باستخدام Gemini." });
+    return res.status(500).json({ error: publicAiError(error, "فشل الرد باستخدام الذكاء الاصطناعي.") });
   }
 });
 
