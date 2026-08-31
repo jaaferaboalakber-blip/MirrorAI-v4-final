@@ -1,0 +1,148 @@
+أريد إضافة Groq كمزوّد AI احتياطي (fallback) إلى MirrorAI، مع الحفاظ الكامل على Gemini وجميع الوظائف الحالية.
+
+مهم جدًا
+
+لا تعدّل أي ملف الآن.
+
+أولًا افحص المشروع فقط وحدد كيف يمكن إضافة Groq بأقل تغيير ممكن.
+
+الهدف النهائي:
+
+MirrorAI
+   ↓
+AI Provider
+   ├── Gemini (primary)
+   └── Groq (fallback)
+
+المطلوب فحصه
+
+افحص خصوصًا:
+
+1. artifacts/api-server/src/routes/gemini.ts
+2. جميع الأماكن التي تستدعي generate().
+3. /api/profile
+4. /api/memory-batch
+5. /api/chat
+6. mode: "persona"
+7. mode: "persona-build"
+8. participant-batch
+9. أي مكان آخر يعتمد مباشرة على Gemini.
+
+المطلوب من fallback
+
+إذا فشل Gemini بسبب:
+
+* 429
+* RESOURCE_EXHAUSTED
+* quota/rate limit
+
+يتمكن النظام من تجربة Groq بدل إيقاف التحليل.
+
+لكن لا نريد fallback عشوائي لكل خطأ.
+
+مثلاً:
+
+* 401 API key خاطئ → لا تعمل fallback تلقائيًا.
+* 400 prompt غير صحيح → لا تعمل fallback.
+* 429 / quota → يمكن تجربة Groq.
+* أخطاء الشبكة المؤقتة → يمكن fallback إذا كان ذلك آمنًا.
+
+Groq
+
+أريد استخدام Groq API الرسمي، وليس أي خدمة وسيطة.
+
+لا تضع API key داخل الكود.
+
+استخدم Replit Secret باسم:
+
+GROQ_API_KEY
+
+ويجب أن يبقى:
+
+GEMINI_API_KEY
+
+يعمل كما هو.
+
+مهم جدًا
+
+لا تحذف Gemini.
+
+أريد أن يبقى Gemini هو الـprimary.
+
+Groq يكون fallback فقط عند الحاجة.
+
+ولا تغير:
+
+* WhatsApp parser
+* profile logic
+* memory-batch logic
+* participant-batch
+* persona-build
+* persona chat
+* /api/analyze
+* /api/chat behavior
+* memory system
+* caching
+* UI
+* API contracts
+
+إلا إذا كان التغيير ضروريًا جدًا لإضافة provider layer.
+
+نماذج Groq
+
+افحص النماذج المتاحة حاليًا في Groq، واختر نموذجًا مناسبًا لمهام:
+
+* تحليل المحادثات.
+* استخراج الذاكرة.
+* بناء Persona.
+* المحادثة.
+
+لا تفترض اسم نموذج قديم؛ تحقق من النموذج المتاح حاليًا قبل التنفيذ.
+
+نقطة مهمة جدًا
+
+لا نريد إرسال نفس الطلب إلى Gemini وGroq بشكل مزدوج.
+
+التسلسل المطلوب:
+
+Gemini
+  ↓
+نجح → استخدم النتيجة
+Gemini
+  ↓
+429/quota
+  ↓
+Groq
+  ↓
+استخدم النتيجة
+
+وليس:
+
+Gemini + Groq معًا
+
+لا تغيّر الـquota أو تحاول تجاوزها
+
+الحل يجب أن يكون شرعيًا:
+
+* Gemini يبقى بحصته الطبيعية.
+* Groq يستخدم حصته الطبيعية.
+* لا تدوير API keys.
+* لا proxy للتحايل.
+* لا تجاوز للـrate limits.
+
+أريد منك في التقرير
+
+بعد الفحص أعطني:
+
+1. الملفات التي ستحتاج تعديلها.
+2. كيف ستعمل طبقة AI provider.
+3. الحالات التي تسبب fallback.
+4. اسم نموذج Groq المقترح ولماذا.
+5. هل يحتاج dependency جديد.
+6. كيف ستتعامل مع JSON responses.
+7. هل Persona وmemory-batch وparticipant-batch ستعمل عبر Groq بدون تغيير في الـAPI contracts.
+8. كيف نضيف GROQ_API_KEY إلى Replit Secrets.
+9. تقدير عدد طلبات Groq التي قد يستخدمها تحليل مجموعة كبيرة.
+10. أي مخاطر أو اختلافات جودة بين Gemini وGroq.
+
+لا تنفذ أي تعديل. توقف بعد التقرير وانتظر موافقتي.
