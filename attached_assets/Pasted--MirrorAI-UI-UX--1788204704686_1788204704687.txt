@@ -1,0 +1,266 @@
+أريد إعادة تصميم واجهة MirrorAI بالكامل لتصبح واجهة احترافية وحديثة، لكن UI/UX فقط.
+
+مهم جدًا: لا تغيّر أي منطق أو وظائف موجودة.
+
+ممنوع تعديل
+
+لا تعدّل:
+
+* WhatsApp parser
+* import/export
+* Gemini provider
+* Groq fallback
+* API routes
+* /api/profile
+* /api/memory-batch
+* /api/analyze
+* /api/chat
+* Persona logic
+* personaChat
+* participant analysis
+* memory system
+* cache
+* API keys / Secrets
+* البيانات أو بنية الـstate
+* أي functionality موجودة
+
+لا تغيّر أسماء الـAPI أو request/response contracts.
+
+المطلوب
+
+أعد تصميم الواجهة لتبدو كمنتج AI احترافي حقيقي، وليس كواجهة تجريبية.
+
+أريد التصميم:
+
+* Modern AI app
+* Premium
+* Minimal
+* Clean
+* Dark-first
+* مناسب جدًا للموبايل وخصوصًا iPhone
+* Responsive بالكامل
+* Typography واضحة
+* مساحات مريحة
+* Cards احترافية
+* Animations خفيفة وسلسة
+* حالات loading/error/empty واضحة
+* أزرار وأيقونات متناسقة
+* Navigation حديثة
+
+الهوية
+
+اسم التطبيق:
+
+MirrorAI
+
+الفكرة البصرية:
+“مرآة رقمية تفهم أسلوب المحادثة وتبني محاكاة AI للشخص.”
+
+أريد إحساس:
+
+* AI
+* شخصي
+* هادئ
+* غامض قليلًا
+* Premium
+* مو واجهة تقنية مزدحمة
+
+الصفحة الرئيسية
+
+اجعلها Dashboard احترافية تحتوي على:
+
+* MirrorAI branding
+* حالة المشروع/المحادثة
+* عدد الرسائل المستوردة
+* الشخص المحدد للتحليل
+* حالة التحليل
+* وصول سريع إلى:
+    * تحليل
+    * Profile
+    * Memory
+    * AI Persona
+    * Chat
+    * Data
+
+استخدم cards واضحة بدل النصوص المتراصة.
+
+Navigation
+
+على Desktop:
+Sidebar حديثة.
+
+على Mobile:
+Bottom navigation أو navigation مناسبة للإبهام.
+
+التبويب الحالي يكون واضحًا بصريًا.
+
+شاشة Chat
+
+أريدها تشبه تطبيقات المحادثة الحديثة:
+
+* Header للشخص/Persona
+* Avatar
+* حالة AI
+* Message bubbles جميلة
+* timestamps بشكل خفيف
+* composer احترافي
+* زر إرسال واضح
+* loading indicator أثناء تفكير AI
+* auto-scroll
+* empty state جميلة
+
+لا تغيّر طريقة عمل chat الحالية.
+
+شاشة AI Persona
+
+هذه أهم شاشة.
+
+أريدها تبدو كأنها صفحة “Digital Twin / AI Persona”.
+
+تحتوي على:
+
+* اسم الشخص
+* Avatar
+* “AI Persona”
+* وصف قصير
+* أسلوب الكلام
+* اللهجة والمفردات
+* طريقة الرد
+* الإيموجي
+* المزاح
+* التعبير العاطفي
+
+ثم زر واضح:
+
+“ابدأ المحادثة”
+
+مع توضيح صغير:
+
+“هذه محاكاة AI مبنية على الرسائل المتاحة وليست الشخص الحقيقي.”
+
+لا تغيّر Persona data أو طريقة توليدها.
+
+شاشة Analysis
+
+اعرض نتائج التحليل بطريقة Cards احترافية.
+
+مثلاً:
+
+* Communication Style
+* Behavioral Patterns
+* Emotional Signals
+* Interaction Patterns
+* Evidence
+
+استخدم hierarchy واضحة بدل عرض النصوص ككتلة واحدة.
+
+شاشة Memory
+
+اجعل الذاكرة تبدو كـKnowledge / Memory system:
+
+* Memory cards
+* categories
+* confidence
+* evidence
+* search/filter إن كان موجودًا أصلًا
+
+لكن لا تغيّر منطق الذاكرة.
+
+شاشة Profile
+
+اعرض profile بطريقة منظمة واحترافية:
+
+* Summary
+* Style fingerprint
+* Patterns
+* Phrases
+* Signals
+* Situations
+* Examples
+
+شاشة Data
+
+اجعل import/export/clear data منظمة وواضحة.
+
+أي عملية destructive مثل Clear Data يجب أن يكون لها confirmation واضح.
+
+الألوان
+
+استخدم نظام ألوان احترافي ومتناسق.
+
+أفضل أن يكون:
+
+* خلفية داكنة أنيقة.
+* surfaces بدرجات مختلفة.
+* accent واحد مميز.
+* text hierarchy واضحة.
+
+تجنب الألوان الصارخة والتدرجات المبالغ فيها.
+
+Icons
+
+استخدم icon library الموجودة بالمشروع إن وجدت.
+
+لا تستخدم emojis كأيقونات UI الأساسية.
+
+Animations
+
+أضف animations خفيفة فقط:
+
+* page transitions
+* card hover
+* button feedback
+* message appearance
+* loading
+
+لا تجعلها ثقيلة أو بطيئة.
+
+أهم شرط
+
+قبل تعديل أي ملف:
+
+1. افحص الواجهة الحالية.
+2. افحص الـcomponents الموجودة.
+3. أعد استخدام الـlogic والـstate الموجود.
+4. لا تعيد كتابة application architecture.
+5. لا تعدّل API أو backend.
+
+يفضل أن تكون التعديلات محصورة قدر الإمكان في:
+
+artifacts/mirrorai/src/styles.css
+
+وأي JSX ضروري فقط داخل:
+
+artifacts/mirrorai/src/MirrorApp.jsx
+
+لا تنشئ dependencies جديدة إلا إذا كانت موجودة أصلًا أو ضرورية جدًا.
+
+بعد التنفيذ
+
+اختبر:
+
+* Desktop
+* Mobile / iPhone width
+* Chat
+* Analysis
+* Profile
+* Memory
+* Persona
+* Data
+* Import
+* Clear
+* Loading states
+* Error states
+
+وتأكد أن كل الوظائف الحالية ما زالت تعمل.
+
+أريد في النهاية تقريرًا يوضح:
+
+* الملفات التي تغيرت.
+* هل تغير أي logic؟
+* هل تغير أي API؟
+* نتائج typecheck/build.
+* هل توجد أخطاء browser console؟
+* معاينة Desktop وMobile.
+
+نفّذ إعادة التصميم الآن، UI/UX فقط، ولا تلمس منطق التطبيق.

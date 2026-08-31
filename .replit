@@ -21,3 +21,8 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+GROQ_API_KEY = "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"
